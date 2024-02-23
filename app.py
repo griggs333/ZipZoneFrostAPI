@@ -21,12 +21,12 @@ class NoaaAPICall:
         self.datasetid = 'NORMAL_ANN'
         self.locationid = ''
         self.datacategoryid = ''
-        self.datatypeid = ['ANN-TMIN-PRBLST-T32FP20', 'ANN-TMIN-PRBLST-T32FP50', 'ANN-TMIN-PRBLST-T32FP80']
+        self.datatypeid = ['ANN-TMIN-PRBLST-T32FP20', 'ANN-TMIN-PRBLST-T32FP50', 'ANN-TMIN-PRBLST-T32FP80', "ANN-TMIN-PRBFST-T32FP20", "ANN-TMIN-PRBFST-T32FP50", "ANN-TMIN-PRBFST-T32FP80"]
         self.extent = ''
         self.startdate = "2010-01-01"
         self.enddate = "2010-01-01"
         self.units = ''
-        self.sortfield = ''
+        self.sortfield = 'datatype'
         self.sortorder = ''
         self.limit = '5'
         self.offset = ''
@@ -98,9 +98,19 @@ class NoaaAPICall:
 
         self.stationid = [response.json()["results"][x]["id"] for x in range(len(response.json()["results"]))]
 
-        return self.stationid
+        # return self.stationid
 
     def noaa_data_api_call(self):
+        #
+        # Datatype Definitions:
+        #   'ANN-TMIN-PRBLST-T32FP20': 20% probability date of last 32F occurrence or later
+        #   'ANN-TMIN-PRBLST-T32FP50': 50% probability date of last 32F occurrence or later
+        #   'ANN-TMIN-PRBLST-T32FP80': 80% probability date of last 32F occurrence or later
+        #   "ANN-TMIN-PRBFST-T32FP20": 20% probability date of first 32F occurrence or earlier
+        #   "ANN-TMIN-PRBFST-T32FP50": 50% probability date of first 32F occurrence or earlier
+        #   "ANN-TMIN-PRBFST-T32FP80": 80% probability date of first 32F occurrence or earlier
+        #
+
         def average_list(li):
             if len(li) < 1:
                 return 0
@@ -111,6 +121,9 @@ class NoaaAPICall:
             spring20 = []
             spring50 = []
             spring80 = []
+            fall20 = []
+            fall50 = []
+            fall80 = []
 
             for i in results:
 
@@ -123,8 +136,16 @@ class NoaaAPICall:
                 elif i["datatype"] == "ANN-TMIN-PRBLST-T32FP80":
                     spring80.append(i["value"])
 
+                elif i["datatype"] == "ANN-TMIN-PRBFST-T32FP20":
+                    fall20.append(i["value"])
 
-            return spring20, spring50, spring80
+                elif i["datatype"] == "ANN-TMIN-PRBFST-T32FP50":
+                    fall50.append(i["value"])
+                    
+                elif i["datatype"] == "ANN-TMIN-PRBFST-T32FP80":
+                    fall80.append(i["value"])
+
+            return spring20, spring50, spring80, fall20, fall50, fall80
 
         def value_to_date_conversion(value):
             start_date = datetime.datetime.strptime("01/01", "%m/%d")
@@ -139,43 +160,38 @@ class NoaaAPICall:
             'token': 'lJXcatwedWjNNDfeJMcluRTMxgkhNxLd'
         }
 
-        query_string = self.queryBuilder(parameter_list=["datasetid", "datatypeid", "stationid", "startdate", "enddate", "includemetadata"])
+        query_string = self.queryBuilder(parameter_list=["datasetid", "datatypeid", "stationid", "startdate", "enddate", "includemetadata", "sortfield"])
         url = baseUrl + query_string
 
         response = requests.request("GET", url, headers=headers, data=payload)
 
-        self.spring20, self.spring50, self.spring80 = append_spring_vals(response.json()["results"])
+        self.spring20, self.spring50, self.spring80, self.fall20, self.fall50, self.fall80 = append_spring_vals(response.json()["results"])
 
-        # with open("response.json", "w") as f:
-        #     json.dump(response.json()["results"], f)
+        with open("response.json", "w") as f:
+            json.dump(response.json()["results"], f)
 
         start_date = "01/01/24"
         date_1 = datetime.datetime.strptime(start_date, "%m/%d/%y")
 
         return {"Spring 20% Date": value_to_date_conversion(value=average_list(self.spring20)),
                 "Spring 50% Date": value_to_date_conversion(value=average_list(self.spring50)),
-                "Spring 80% Date": value_to_date_conversion(value=average_list(self.spring80))}
+                "Spring 80% Date": value_to_date_conversion(value=average_list(self.spring80)),
+                "Fall 20% Date": value_to_date_conversion(value=average_list(self.fall20)),
+                "Fall 50% Date": value_to_date_conversion(value=average_list(self.fall50)),
+                "Fall 80% Date": value_to_date_conversion(value=average_list(self.fall80))
+                }
 
 
 @app.route('/zipcode', methods={'POST', 'GET'})
 @validate()
 def get_zip(query: ZipCode):
 
-    zip_call = NoaaAPICall()
-    zip_call.locationid = "ZIP:" + query.zip
+    noaa_api_call = NoaaAPICall()
+    noaa_api_call.locationid = "ZIP:" + query.zip
+    noaa_api_call.zip_to_lat_lon()
+    noaa_api_call.lat_lon_to_stationid()
 
-    station_call = NoaaAPICall()
-    station_call.lat, station_call.lon = zip_call.zip_to_lat_lon()
-    # station_call.extent = str(float(station_call.lat)-0.5) + "," + str(float(station_call.lon)-0.5) + "," + str(float(station_call.lat)+0.5) + "," + str(float(station_call.lon)+0.5)
-
-    data_call = NoaaAPICall()
-    data_call.stationid = station_call.lat_lon_to_stationid()
-    # data_call.datasetid = 'NORMAL_ANN'
-    # data_call.datatypeid = ['ANN-TMIN-PRBLST-T32FP20', 'ANN-TMIN-PRBLST-T32FP50', 'ANN-TMIN-PRBLST-T32FP80']
-    # data_call.startdate = "2010-01-01"
-    # data_call.enddate = "2010-01-01"
-
-    temp_result = data_call.noaa_data_api_call()
+    temp_result = noaa_api_call.noaa_data_api_call()
 
     print(temp_result)
     return query
