@@ -1,5 +1,5 @@
 import numpy as np
-from flask import Flask, render_template, url_for, request, redirect
+from flask import Flask, render_template, url_for, request, redirect, abort
 import os
 from flask_pydantic import validate
 from pydantic import BaseModel, Field
@@ -10,6 +10,10 @@ import json
 import datetime
 
 app = Flask(__name__)
+
+@app.errorhandler(500)
+def internal_error(error):
+    return {"error": "500 Internal Error"}
 
 
 class ZipCode(BaseModel):
@@ -162,16 +166,19 @@ class NoaaAPICall:
 
         query_string = self.queryBuilder(parameter_list=["datasetid", "datatypeid", "stationid", "startdate", "enddate", "includemetadata", "sortfield"])
         url = baseUrl + query_string
+        print(url)
 
         response = requests.request("GET", url, headers=headers, data=payload)
 
-        self.spring20, self.spring50, self.spring80, self.fall20, self.fall50, self.fall80 = append_spring_vals(response.json()["results"])
+        # with open("response.json", "w") as f:
+        #     json.dump(response.json()["results"], f)
 
-        with open("response.json", "w") as f:
-            json.dump(response.json()["results"], f)
+        try:
+            self.spring20, self.spring50, self.spring80, self.fall20, self.fall50, self.fall80 = append_spring_vals(response.json()["results"])
+        except:
+            print("No frost dates found for this location")
+            raise Exception("No frost dates found for this location")
 
-        start_date = "01/01/24"
-        date_1 = datetime.datetime.strptime(start_date, "%m/%d/%y")
 
         return {"Spring 20% Date": value_to_date_conversion(value=average_list(self.spring20)),
                 "Spring 50% Date": value_to_date_conversion(value=average_list(self.spring50)),
@@ -194,10 +201,12 @@ def get_zip(query: ZipCode):
     temp_result = noaa_api_call.noaa_data_api_call()
 
     print(temp_result)
-    return query
+    return temp_result
 
 
-
+@app.route('/500')
+def error500():
+    abort(500)
 
 
 app.run(host='0.0.0.0', port=8080)
