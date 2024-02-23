@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 from typing import Annotated
 import requests
 # import gunicorn_conf
+import json
+import datetime
 
 app = Flask(__name__)
 
@@ -88,11 +90,36 @@ class ZipCode(BaseModel):
 
 
 class NoaaAPICall:
+    def __init__(self):
+        self.datasetid = 'NORMAL_ANN'
+        self.locationid = ''
+        self.datacategoryid = ''
+        self.datatypeid = ['ANN-TMIN-PRBLST-T32FP20', 'ANN-TMIN-PRBLST-T32FP50', 'ANN-TMIN-PRBLST-T32FP80']
+        self.extent = ''
+        self.startdate = "2010-01-01"
+        self.enddate = "2010-01-01"
+        self.units = ''
+        self.sortfield = ''
+        self.sortorder = ''
+        self.limit = '5'
+        self.offset = ''
+        self.lat = ''
+        self.lon = ''
+        self.stationid = ''
+        self.includemetadata = "false"
+        self.spring20 = []
+        self.spring50 = []
+        self.spring80 = []
+        self.fall20 = []
+        self.fall50 = []
+        self.fall80 = []
 
-    def queryBuilder(self):
+    def queryBuilder(self, parameter_list=None):
         query_string = ''
+        if parameter_list is None:
+            parameter_list = self.__dict__.keys()
         i_dict = self.__dict__
-        for i in i_dict:
+        for i in parameter_list:
             if type(i_dict[i]) is list:
                 for x in i_dict[i]:
                     query_string += str(i) + '=' + str(x) + "&"
@@ -107,7 +134,7 @@ class NoaaAPICall:
         headers = {
             'token': 'lJXcatwedWjNNDfeJMcluRTMxgkhNxLd'
         }
-        query_string = self.queryBuilder()
+        query_string = self.queryBuilder(parameter_list=["locationid", "limit", "includemetadata"])
         url = baseUrl + query_string
 
         # print(url)
@@ -131,7 +158,7 @@ class NoaaAPICall:
         }
         # self.extent = "extent=" + str(float(self.lat)-0.5) + "," + str(float(self.lon)-0.5) + "," + str(float(self.lat)+0.5) + "," + str(float(self.lon)+0.5)
 
-        query_string = self.queryBuilder()
+        query_string = self.queryBuilder(parameter_list=["datasetid", "extent", "limit", "includemetadata"])
         url = baseUrl + query_string
 
         # print(url)
@@ -143,24 +170,54 @@ class NoaaAPICall:
         return self.stationid
 
     def noaa_data_api_call(self):
+        def average_list(li):
+            if len(li) < 1:
+                return 0
+            return round(sum(li) / len(li))
+
+        #Temporary until response parser/crawler is written
+        def append_spring_vals(results):
+            spring20 = []
+            spring50 = []
+            spring80 = []
+
+            for i in results:
+
+                if i["datatype"] == "ANN-TMIN-PRBLST-T32FP20":
+                    spring20.append(i["value"])
+
+                elif i["datatype"] == "ANN-TMIN-PRBLST-T32FP50":
+                    spring50.append(i["value"])
+
+                elif i["datatype"] == "ANN-TMIN-PRBLST-T32FP80":
+                    spring80.append(i["value"])
+
+
+            return spring20, spring50, spring80
+
         baseUrl = "https://www.ncei.noaa.gov/cdo-web/api/v2/data?"
         payload = {}
         headers = {
             'token': 'lJXcatwedWjNNDfeJMcluRTMxgkhNxLd'
         }
 
-        query_string = self.queryBuilder()
+        query_string = self.queryBuilder(parameter_list=["datasetid", "datatypeid", "stationid", "startdate", "enddate", "includemetadata"])
         url = baseUrl + query_string
 
         # print(url)
 
         response = requests.request("GET", url, headers=headers, data=payload)
 
-        # print(type(response.json()["results"]), response.json()["results"])
-        parsed_results = [response.json()["results"][0]["datatype"], response.json()["results"][0]["value"]]
-        # parsed_results = [[response.json()["results"][x]["datatype"], response.json()["results"][x]["value"]] for x in range(len(response.json()["results"]))]
+        # parsed_results = [response.json()["results"][0]["datatype"], response.json()["results"][0]["value"]]
 
-        return parsed_results
+        self.spring20, self.spring50, self.spring80 = append_spring_vals(response.json()["results"])
+
+        # with open("response.json", "w") as f:
+        #     json.dump(response.json()["results"], f)
+        start_date = "01/01/24"
+        date_1 = datetime.datetime.strptime(start_date, "%m/%d/%y")
+
+        return {"Spring 20% Value": average_list(self.spring20), "Spring 50% Value": average_list(self.spring50), "Spring 80% Value": average_list(self.spring80), "Spring20 date":date_1 + datetime.timedelta(days=average_list(self.spring20))}
 
 
 @app.route('/zipcode', methods={'POST', 'GET'})
@@ -169,14 +226,10 @@ def get_zip(query: ZipCode):
 
     zip_call = NoaaAPICall()
     zip_call.locationid = "ZIP:" + query.zip
-    zip_call.limit = '5'
-    zip_call.includemetadata = "false"
 
     station_call = NoaaAPICall()
     station_call.lat, station_call.lon = zip_call.zip_to_lat_lon()
     station_call.extent = str(float(station_call.lat)-0.5) + "," + str(float(station_call.lon)-0.5) + "," + str(float(station_call.lat)+0.5) + "," + str(float(station_call.lon)+0.5)
-    station_call.datasetid = 'NORMAL_ANN'
-    station_call.limit = '5'
 
     data_call = NoaaAPICall()
     data_call.stationid = station_call.lat_lon_to_stationid()
