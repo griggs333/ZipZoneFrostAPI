@@ -19,39 +19,71 @@ app = Flask(__name__)
 # def internal_error(error):
 #     return {"error": "500 Internal Error"}
 
-class MissingResource(Exception):
+class CustomExceptions(Exception):
+    status_code = 500
+
+    def __init__(self, message, status_code=None, payload=None):
+        super().__init__()
+        self.message = message
+        if status_code is not None:
+            self.status_code = status_code
+        self.payload = payload
+
+    def to_dict(self):
+        rv = dict(self.payload or ())
+        rv['message'] = self.message
+        return rv
+
+class MissingResource(CustomExceptions):
     status_code = 404
+    pass
 
-    def __init__(self, message, status_code=None, payload=None):
-        super().__init__()
-        self.message = message
-        if status_code is not None:
-            self.status_code = status_code
-        self.payload = payload
 
-    def to_dict(self):
-        rv = dict(self.payload or ())
-        rv['message'] = self.message
-        return rv
-
-class InvalidAPIUsage(Exception):
+class InvalidAPIUsage(CustomExceptions):
     status_code = 400
-
-    def __init__(self, message, status_code=None, payload=None):
-        super().__init__()
-        self.message = message
-        if status_code is not None:
-            self.status_code = status_code
-        self.payload = payload
-
-    def to_dict(self):
-        rv = dict(self.payload or ())
-        rv['message'] = self.message
-        return rv
+    pass
 
 
+class NOAAAPIResponseError(CustomExceptions):
+    status_code = 404
+    pass
 
 
+# class MissingResource(Exception):
+#     status_code = 404
+#
+#     def __init__(self, message, status_code=None, payload=None):
+#         super().__init__()
+#         self.message = message
+#         if status_code is not None:
+#             self.status_code = status_code
+#         self.payload = payload
+#
+#     def to_dict(self):
+#         rv = dict(self.payload or ())
+#         rv['message'] = self.message
+#         return rv
+#
+# class InvalidAPIUsage(Exception):
+#     status_code = 400
+#
+#     def __init__(self, message, status_code=None, payload=None):
+#         super().__init__()
+#         self.message = message
+#         if status_code is not None:
+#             self.status_code = status_code
+#         self.payload = payload
+#
+#     def to_dict(self):
+#         rv = dict(self.payload or ())
+#         rv['message'] = self.message
+#         return rv
+
+
+
+@app.errorhandler(NOAAAPIResponseError)
+def noaa_api_response_error(e):
+    return jsonify(e.to_dict()), e.status_code
 
 @app.errorhandler(InvalidAPIUsage)
 def invalid_api_usage(e):
@@ -145,7 +177,9 @@ class NoaaAPICall:
         # print(url)
 
         response = requests.request("GET", url, headers=headers, data=payload)
-        if not response.json():
+        if response.status_code != 200:
+            raise NOAAAPIResponseError("NOAA API stations endpoint returned a " + response.status_code + " status code.")
+        elif not response.json():
             raise MissingResource("Empty response from NOAA API stations endpoint for zip to Lat/Long search. Please check that your zip code is valid or try another nearby zip code.")
 
         self.lat = response.json()["results"][0]["latitude"]
@@ -167,6 +201,10 @@ class NoaaAPICall:
         url = baseUrl + query_string
 
         response = requests.request("GET", url, headers=headers, data=payload)
+        if response.status_code != 200:
+            raise NOAAAPIResponseError(
+                "NOAA API stations endpoint returned a " + response.status_code + " status code.")
+
         if not response.json():
             raise MissingResource("Empty response from NOAA API stations endpoint for lat/lon boundary box to stations search")
 
@@ -245,6 +283,10 @@ class NoaaAPICall:
         # print(url)
 
         response = requests.request("GET", url, headers=headers, data=payload)
+        if response.status_code != 200:
+            raise NOAAAPIResponseError(
+                "NOAA API stations endpoint returned a " + response.status_code + " status code.")
+
         if not response.json():
             raise MissingResource("Empty response from NOAA API data endpoint")
 
