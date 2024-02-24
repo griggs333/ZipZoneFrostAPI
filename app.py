@@ -1,5 +1,6 @@
 import numpy as np
-from flask import Flask, render_template, url_for, request, redirect, abort
+from flask import Flask, render_template, url_for, request, redirect, abort, jsonify
+from werkzeug.exceptions import HTTPException
 import os
 from flask_pydantic import validate
 from pydantic import BaseModel, Field
@@ -11,9 +12,74 @@ import datetime
 
 app = Flask(__name__)
 
-@app.errorhandler(500)
-def internal_error(error):
-    return {"error": "500 Internal Error"}
+#
+# Error Handling
+
+# @app.errorhandler(500)
+# def internal_error(error):
+#     return {"error": "500 Internal Error"}
+
+class MissingResource(Exception):
+    status_code = 404
+
+    def __init__(self, message, status_code=None, payload=None):
+        super().__init__()
+        self.message = message
+        if status_code is not None:
+            self.status_code = status_code
+        self.payload = payload
+
+    def to_dict(self):
+        rv = dict(self.payload or ())
+        rv['message'] = self.message
+        return rv
+
+class InvalidAPIUsage(Exception):
+    status_code = 400
+
+    def __init__(self, message, status_code=None, payload=None):
+        super().__init__()
+        self.message = message
+        if status_code is not None:
+            self.status_code = status_code
+        self.payload = payload
+
+    def to_dict(self):
+        rv = dict(self.payload or ())
+        rv['message'] = self.message
+        return rv
+
+
+
+
+
+@app.errorhandler(InvalidAPIUsage)
+def invalid_api_usage(e):
+    return jsonify(e.to_dict()), e.status_code
+
+@app.errorhandler(MissingResource)
+def missing_resource(e):
+    return jsonify(e.to_dict()), e.status_code
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Return JSON instead of HTML for HTTP errors."""
+    if isinstance(e, HTTPException):
+        # start with the correct headers and status code from the error
+        response = e.get_response()
+        # replace the body with JSON
+        response.data = json.dumps({
+            "code": e.code,
+            "name": e.name,
+            "description": e.description,
+        })
+        response.content_type = "application/json"
+        return response
+    else:
+        response = jsonify(error=str(e))
+        response.content_type = "application/json"
+        return response
+##############
 
 
 class ZipCode(BaseModel):
@@ -79,6 +145,8 @@ class NoaaAPICall:
         # print(url)
 
         response = requests.request("GET", url, headers=headers, data=payload)
+        if not response.json():
+            raise MissingResource("Empty response from NOAA API stations endpoint for zip to Lat/Long search. Please check that your zip code is valid or try another nearby zip code.")
 
         self.lat = response.json()["results"][0]["latitude"]
         self.lon = response.json()["results"][0]["longitude"]
@@ -99,6 +167,9 @@ class NoaaAPICall:
         url = baseUrl + query_string
 
         response = requests.request("GET", url, headers=headers, data=payload)
+        if not response.json():
+            raise MissingResource("Empty response from NOAA API stations endpoint for lat/lon boundary box to stations search")
+
 
         self.stationid = [response.json()["results"][x]["id"] for x in range(len(response.json()["results"]))]
 
@@ -118,7 +189,10 @@ class NoaaAPICall:
         def average_list(li):
             if len(li) < 1:
                 return 0
-            return round(sum(li) / len(li))
+            try:
+                return round(sum(li) / len(li))
+            except (ValueError, ZeroDivisionError, TypeError):
+                raise Exception("Invalid frost date value returned from NOAA API")
 
         #Temporary until response parser/crawler is written
         def append_spring_vals(results):
@@ -130,24 +204,26 @@ class NoaaAPICall:
             fall80 = []
 
             for i in results:
+                if isinstance(i, dict):
+                    if i["datatype"] == "ANN-TMIN-PRBLST-T32FP20":
+                        spring20.append(i["value"])
 
-                if i["datatype"] == "ANN-TMIN-PRBLST-T32FP20":
-                    spring20.append(i["value"])
+                    elif i["datatype"] == "ANN-TMIN-PRBLST-T32FP50":
+                        spring50.append(i["value"])
 
-                elif i["datatype"] == "ANN-TMIN-PRBLST-T32FP50":
-                    spring50.append(i["value"])
+                    elif i["datatype"] == "ANN-TMIN-PRBLST-T32FP80":
+                        spring80.append(i["value"])
 
-                elif i["datatype"] == "ANN-TMIN-PRBLST-T32FP80":
-                    spring80.append(i["value"])
+                    elif i["datatype"] == "ANN-TMIN-PRBFST-T32FP20":
+                        fall20.append(i["value"])
 
-                elif i["datatype"] == "ANN-TMIN-PRBFST-T32FP20":
-                    fall20.append(i["value"])
+                    elif i["datatype"] == "ANN-TMIN-PRBFST-T32FP50":
+                        fall50.append(i["value"])
 
-                elif i["datatype"] == "ANN-TMIN-PRBFST-T32FP50":
-                    fall50.append(i["value"])
-                    
-                elif i["datatype"] == "ANN-TMIN-PRBFST-T32FP80":
-                    fall80.append(i["value"])
+                    elif i["datatype"] == "ANN-TMIN-PRBFST-T32FP80":
+                        fall80.append(i["value"])
+                else:
+                    raise Exception("Non-standard response from NOAA API data endpoint")
 
             return spring20, spring50, spring80, fall20, fall50, fall80
 
@@ -166,9 +242,12 @@ class NoaaAPICall:
 
         query_string = self.queryBuilder(parameter_list=["datasetid", "datatypeid", "stationid", "startdate", "enddate", "includemetadata", "sortfield"])
         url = baseUrl + query_string
-        print(url)
+        # print(url)
 
         response = requests.request("GET", url, headers=headers, data=payload)
+        if not response.json():
+            raise MissingResource("Empty response from NOAA API data endpoint")
+
 
         # with open("response.json", "w") as f:
         #     json.dump(response.json()["results"], f)
@@ -176,8 +255,7 @@ class NoaaAPICall:
         try:
             self.spring20, self.spring50, self.spring80, self.fall20, self.fall50, self.fall80 = append_spring_vals(response.json()["results"])
         except:
-            print("No frost dates found for this location")
-            raise Exception("No frost dates found for this location")
+            raise MissingResource("No frost dates found for this location", status_code=404)
 
 
         return {"Spring 20% Date": value_to_date_conversion(value=average_list(self.spring20)),
@@ -189,7 +267,7 @@ class NoaaAPICall:
                 }
 
 
-@app.route('/zipcode', methods={'POST', 'GET'})
+@app.route('/zipcode', methods={'GET'})
 @validate()
 def get_zip(query: ZipCode):
 
@@ -202,11 +280,6 @@ def get_zip(query: ZipCode):
 
     print(temp_result)
     return temp_result
-
-
-@app.route('/500')
-def error500():
-    abort(500)
 
 
 app.run(host='0.0.0.0', port=8080)
