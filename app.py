@@ -269,7 +269,10 @@ class NoaaAPICall:
             start_date = datetime.datetime.strptime("01/01", "%m/%d")
             end_date = start_date + datetime.timedelta(days=value)
 
-            return end_date.strftime("%m/%d")
+            return {
+                "month": end_date.month,
+                "day": end_date.day
+            }
 
 
         baseUrl = "https://www.ncei.noaa.gov/cdo-web/api/v2/data?"
@@ -300,12 +303,12 @@ class NoaaAPICall:
             raise MissingResource("No frost dates found for this location", status_code=404)
 
 
-        return {"Spring 20% Date": value_to_date_conversion(value=average_list(self.spring20)),
-                "Spring 50% Date": value_to_date_conversion(value=average_list(self.spring50)),
-                "Spring 80% Date": value_to_date_conversion(value=average_list(self.spring80)),
-                "Fall 20% Date": value_to_date_conversion(value=average_list(self.fall20)),
-                "Fall 50% Date": value_to_date_conversion(value=average_list(self.fall50)),
-                "Fall 80% Date": value_to_date_conversion(value=average_list(self.fall80))
+        return {"last_t32_fp20_date": value_to_date_conversion(value=average_list(self.spring20)),
+                "last_t32_fp50_date": value_to_date_conversion(value=average_list(self.spring50)),
+                "last_t32_fp80_date": value_to_date_conversion(value=average_list(self.spring80)),
+                "first_t32_fp20_date": value_to_date_conversion(value=average_list(self.fall20)),
+                "first_t32_fp50_date": value_to_date_conversion(value=average_list(self.fall50)),
+                "first_t32_fp80_date": value_to_date_conversion(value=average_list(self.fall80))
                 }
 
 
