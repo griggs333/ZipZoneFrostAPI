@@ -326,5 +326,10 @@ def get_zip(query: ZipCode):
     print(temp_result)
     return temp_result
 
+@app.route('/', methods={'GET', 'POST'})
+def index():
+
+    return render_template('index.html')
+
 
 app.run(host='0.0.0.0', port=8080)
