@@ -6,7 +6,8 @@ from flask_pydantic import validate
 from pydantic import BaseModel, Field
 from typing import Annotated
 import requests
-# import gunicorn_conf
+# import gunicorn
+import gunicorn_conf
 import json
 import datetime
 
@@ -332,5 +333,6 @@ def index():
     return render_template('index.html')
 
 
-app.run(host='0.0.0.0', port=8080)
-
+# app.run(host='0.0.0.0', port=8080)
+if __name__== "__main__":
+    app.run(host='0.0.0.0', port=gunicorn_conf.PORT, debug=gunicorn_conf.DEBUG_MODE)
